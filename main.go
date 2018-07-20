@@ -5,8 +5,15 @@ import (
     "github.com/aws/aws-sdk-go/aws/session"
     "github.com/aws/aws-sdk-go/service/ec2"
 
+//    "k8s.io/apimachinery/pkg/api/errors"
+    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    "k8s.io/client-go/kubernetes"
+    "k8s.io/client-go/tools/clientcmd"
+    _ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
+
     "fmt"
     "os"
+//    "path/filepath"
 )
 
 var region = os.Getenv("AWS_DEFAULT_REGION")
@@ -16,26 +23,23 @@ type kubeInstanceInfo struct {
     imageId string
     instanceId string
     old bool
+    region string
     state string
 }
 
-type kubeInstances struct {
-    info []kubeInstanceInfo
-}
-
-func main() {
+func getInstances() ([]kubeInstanceInfo, error) {
     sess, err := session.NewSession()
 
     if err != nil {
-        fmt.Println("Error creating session ", err)
-        return
+        return nil, err
     }
 
     ec2Svc := ec2.New(sess, aws.NewConfig().WithRegion(region))
-    result, err := ec2Svc.DescribeInstances(nil)
+    var instances []kubeInstanceInfo
 
+    result, err := ec2Svc.DescribeInstances(nil)
     if err != nil {
-        fmt.Println("Error", err)
+        return nil, err
     } else {
         for _, reservation := range result.Reservations {
             for _, instance := range reservation.Instances {
@@ -44,13 +48,41 @@ func main() {
                     imageId: *instance.ImageId,
                     instanceId: *instance.InstanceId,
                     old: true,
-                    state: "",
+                    region: *instance.Placement.AvailabilityZone,
+                    state: "unknown",
                 }
-                fmt.Println(instanceDetails)
+                instances = append (instances, instanceDetails)
             }
         }
 
     }
+    return instances, nil
+}
 
+func main() {
+/*    result, err := getInstances()
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "error: %v\n", err)
 
+        os.Exit(1)
+    }
+    fmt.Println(result)
+*/
+    kubeconfig := "/Users/drosth/.kube/alpaca-dev.conf"
+
+    // use the current context in kubeconfig
+    config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+    if err != nil {
+        panic(err.Error())
+    }
+    clientset, err := kubernetes.NewForConfig(config)
+    if err != nil {
+        panic(err.Error())
+    }
+
+    nodes, err := clientset.CoreV1().Nodes().List(metav1.ListOptions{})
+    if err != nil {
+        panic(err.Error())
+    }
+    fmt.Println(nodes)
 }
